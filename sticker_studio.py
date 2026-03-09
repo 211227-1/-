@@ -2290,8 +2290,8 @@ def parse_settitle_payload(payload: str) -> tuple[str | None, str]:
 
 def serve_welcome_text(bot_username: str) -> str:
     return (
-        "欢迎使用表情包工作室。\n"
-        "免费使用简单操作。\n\n"
+        "一款优雅且的Telegram贴纸/表情克隆工具，支持贴纸包高效处理、表情包克隆，一键跳转，极简操作！\n"
+        "演示机器人 @bahaohuanhuibot\n\n"
         "新手三步:\n"
         "1) 发表情包链接 -> 自动克隆\n"
         "2) 发图片 -> 自动做成贴纸并加入当前包\n"
