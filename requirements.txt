@@ -1,0 +1,5 @@
+aiohttp==3.12.15
+Pillow==11.1.0
+python-dotenv==1.0.1
+rich==13.9.4
+qrcode==7.4.2
