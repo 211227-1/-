@@ -134,3 +134,8 @@ python sticker_studio.py serve
 ## Star 支持
 
 如果这个项目对你有帮助，欢迎点个 Star。
+
+## 官方入口
+
+👥 交流群: https://t.me/bqbkl  
+🧑‍💻 联系作者: https://t.me/zuyuvip
