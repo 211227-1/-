@@ -139,3 +139,4 @@ python sticker_studio.py serve
 
 👥 交流群: https://t.me/bqbkl  
 🧑‍💻 联系作者: https://t.me/zuyuvip
+点击体验: https://t.me/bahaohuanhuibot
