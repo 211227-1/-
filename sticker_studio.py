@@ -1597,6 +1597,48 @@ async def clone_sticker_set(
     ):
         await _maybe_await(info_cb("clone_mode=copy + watermark: 静态贴纸将渲染后再入包。"))
 
+    async def _send_info(message: str) -> None:
+        if info_cb is not None:
+            await _maybe_await(info_cb(message))
+
+    def _upload_meta_for_format(fmt: str) -> tuple[str, str]:
+        if fmt == "video":
+            return "sticker.webm", "video/webm"
+        if fmt == "animated":
+            return "sticker.tgs", "application/x-tgsticker"
+        return "sticker.webp", "image/webp"
+
+    async def _create_set_with_uploaded(sticker: dict[str, Any], emojis: list[str], fmt: str) -> None:
+        raw = await client.download_file(sticker["file_id"])
+        filename, content_type = _upload_meta_for_format(fmt)
+        payload = {
+            "user_id": owner_user_id,
+            "name": target_short_name,
+            "title": final_title,
+            "sticker_type": sticker_type,
+            "sticker_format": fmt,
+            "stickers": json.dumps(
+                [build_input_sticker("attach://sticker_file", emojis, sticker_format=fmt)],
+                ensure_ascii=False,
+            ),
+        }
+        files = {"sticker_file": (filename, raw, content_type)}
+        await client.call("createNewStickerSet", payload, files=files)
+
+    async def _add_with_uploaded(sticker: dict[str, Any], emojis: list[str], fmt: str) -> None:
+        raw = await client.download_file(sticker["file_id"])
+        filename, content_type = _upload_meta_for_format(fmt)
+        payload = {
+            "user_id": owner_user_id,
+            "name": target_short_name,
+            "sticker": json.dumps(
+                build_input_sticker("attach://sticker_file", emojis, sticker_format=fmt),
+                ensure_ascii=False,
+            ),
+        }
+        files = {"sticker_file": (filename, raw, content_type)}
+        await client.call("addStickerToSet", payload, files=files)
+
     async def create_set_with(sticker: dict[str, Any], emojis: list[str]) -> None:
         nonlocal created
         fmt = detect_sticker_format(sticker)
@@ -1637,30 +1679,34 @@ async def clone_sticker_set(
                 await client.call("createNewStickerSet", payload)
             except TelegramAPIError as exc:
                 # Some static packs still fail in pure copy mode; fallback to upload rendered static sticker.
-                if fmt != "static" or (not is_sticker_format_error(exc)):
+                if fmt == "static" and is_sticker_format_error(exc):
+                    raw = await client.download_file(sticker["file_id"])
+                    out = render_static_sticker(
+                        raw,
+                        watermark=watermark,
+                        wm_pos=watermark_pos,
+                        wm_opacity=watermark_opacity,
+                        mode=norm_visual_mode,
+                        fit_mode=norm_fit_mode,
+                    )
+                    fallback_payload = {
+                        "user_id": owner_user_id,
+                        "name": target_short_name,
+                        "title": final_title,
+                        "sticker_type": sticker_type,
+                        "sticker_format": "static",
+                        "stickers": json.dumps(
+                            [build_input_sticker("attach://sticker_file", emojis, sticker_format="static")],
+                            ensure_ascii=False,
+                        ),
+                    }
+                    files = {"sticker_file": ("sticker.webp", out, "image/webp")}
+                    await client.call("createNewStickerSet", fallback_payload, files=files)
+                elif fmt in {"video", "animated"}:
+                    await _send_info(f"{fmt} 贴纸 file_id 直拷失败，正在自动重试上传源文件...")
+                    await _create_set_with_uploaded(sticker, emojis, fmt)
+                else:
                     raise
-                raw = await client.download_file(sticker["file_id"])
-                out = render_static_sticker(
-                    raw,
-                    watermark=watermark,
-                    wm_pos=watermark_pos,
-                    wm_opacity=watermark_opacity,
-                    mode=norm_visual_mode,
-                    fit_mode=norm_fit_mode,
-                )
-                fallback_payload = {
-                    "user_id": owner_user_id,
-                    "name": target_short_name,
-                    "title": final_title,
-                    "sticker_type": sticker_type,
-                    "sticker_format": "static",
-                    "stickers": json.dumps(
-                        [build_input_sticker("attach://sticker_file", emojis, sticker_format="static")],
-                        ensure_ascii=False,
-                    ),
-                }
-                files = {"sticker_file": ("sticker.webp", out, "image/webp")}
-                await client.call("createNewStickerSet", fallback_payload, files=files)
 
         created = True
         state_obj["created"] = True
@@ -1698,27 +1744,31 @@ async def clone_sticker_set(
             try:
                 await client.call("addStickerToSet", payload)
             except TelegramAPIError as exc:
-                if fmt != "static" or (not is_sticker_format_error(exc)):
+                if fmt == "static" and is_sticker_format_error(exc):
+                    raw = await client.download_file(sticker["file_id"])
+                    out = render_static_sticker(
+                        raw,
+                        watermark=watermark,
+                        wm_pos=watermark_pos,
+                        wm_opacity=watermark_opacity,
+                        mode=norm_visual_mode,
+                        fit_mode=norm_fit_mode,
+                    )
+                    fallback_payload = {
+                        "user_id": owner_user_id,
+                        "name": target_short_name,
+                        "sticker": json.dumps(
+                            build_input_sticker("attach://sticker_file", emojis, sticker_format="static"),
+                            ensure_ascii=False,
+                        ),
+                    }
+                    files = {"sticker_file": ("sticker.webp", out, "image/webp")}
+                    await client.call("addStickerToSet", fallback_payload, files=files)
+                elif fmt in {"video", "animated"}:
+                    await _send_info(f"{fmt} 贴纸 file_id 直拷失败，正在自动重试上传源文件...")
+                    await _add_with_uploaded(sticker, emojis, fmt)
+                else:
                     raise
-                raw = await client.download_file(sticker["file_id"])
-                out = render_static_sticker(
-                    raw,
-                    watermark=watermark,
-                    wm_pos=watermark_pos,
-                    wm_opacity=watermark_opacity,
-                    mode=norm_visual_mode,
-                    fit_mode=norm_fit_mode,
-                )
-                fallback_payload = {
-                    "user_id": owner_user_id,
-                    "name": target_short_name,
-                    "sticker": json.dumps(
-                        build_input_sticker("attach://sticker_file", emojis, sticker_format="static"),
-                        ensure_ascii=False,
-                    ),
-                }
-                files = {"sticker_file": ("sticker.webp", out, "image/webp")}
-                await client.call("addStickerToSet", fallback_payload, files=files)
 
     completed_count = len(done)
     if progress_cb is not None:
