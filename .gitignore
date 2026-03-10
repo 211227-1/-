@@ -4,6 +4,7 @@ __pycache__/
 .sticker_state_*.json
 .user_prefs.json
 .usage_data.json
+.admin_audit.jsonl
 *.pyc
 *.pyo
 *.pyd

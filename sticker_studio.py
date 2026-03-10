@@ -57,6 +57,7 @@ DEFAULT_USER_SETTINGS = {
     "mode": "maker",
     "fit_mode": "contain",
     "clone_mode": "studio",
+    "clone_title": "",
     "make_target_mode": "ask",
     "current_pack_short": "",
     "current_pack_title": "",
@@ -2338,6 +2339,7 @@ def serve_help_text(bot_username: str) -> str:
         "/setmaker @你的署名\n"
         "/setmode maker\n"
         "/setfit contain\n"
+        "/setclonetitle {source} 克隆 {date}\n"
         "/setmaketarget ask\n"
         "/settitle 新标题（修改当前包标题）\n\n"
         "查看完整命令: /helpall\n"
@@ -2366,6 +2368,8 @@ def serve_help_full_text(bot_username: str) -> str:
         "/setmode <maker|clean|brand|circle|pixel|bw>\n"
         "/setfit <contain|cover>\n"
         "/setclonemode <copy|studio>\n"
+        "/setclonetitle <标题模板>  设置默认克隆标题(支持 {source} {date})\n"
+        "/clearclonetitle       清空默认克隆标题\n"
         "/setmaketarget <ask|join|new>\n"
         "/settitle <新标题> 或 /settitle <短名|链接> | <新标题>\n"
         "/setpack <short_name> | <title>\n"
@@ -2860,6 +2864,7 @@ def user_profile_text(user_id: int, settings: dict[str, Any], usage: dict[str, A
     mode = visual_mode_label(settings.get("mode"))
     fit_mode = fit_mode_label(settings.get("fit_mode"))
     clone_mode = clone_mode_label(settings.get("clone_mode"))
+    clone_title = (settings.get("clone_title") or "").strip() or "(自动: 来源标题 + 克隆)"
     make_target = make_target_mode_label(settings.get("make_target_mode"))
     short_name = (settings.get("current_pack_short") or "").strip() or "(自动)"
     title = (settings.get("current_pack_title") or "").strip() or "(自动)"
@@ -2869,6 +2874,7 @@ def user_profile_text(user_id: int, settings: dict[str, Any], usage: dict[str, A
         f"用户ID：{user_id}\n"
         f"制作人署名：{wm}\n"
         f"视觉模式：{mode}（适配：{fit_mode}，克隆策略：{clone_mode}）\n"
+        f"默认克隆标题：{clone_title}\n"
         f"发图默认去向：{make_target}\n"
         f"剩余次数：克隆 {int(usage.get('clone_left', 0))} 次，制作 {int(usage.get('make_left', 0))} 次\n"
         f"已邀请好友：{int(usage.get('invite_count', 0))} 人\n"
@@ -2892,6 +2898,7 @@ def user_center_text(
     mode = visual_mode_label(settings.get("mode"))
     fit_mode = fit_mode_label(settings.get("fit_mode"))
     clone_mode = clone_mode_label(settings.get("clone_mode"))
+    clone_title = (settings.get("clone_title") or "").strip() or "(自动)"
     make_target = make_target_mode_label(settings.get("make_target_mode"))
     display_name = usage.get("display_name") or usage.get("username") or str(user_id)
     parts = [
@@ -2901,6 +2908,7 @@ def user_center_text(
         f"🤝 邀请人数: {int(usage.get('invite_count', 0))} 人",
         f"🏷 制作人署名: {wm}",
         f"⚙ 当前模式: {mode} / {fit_mode} / {clone_mode}",
+        f"📝 默认克隆标题: {clone_title}",
         f"🖼 发图默认: {make_target}",
         (
             f"🎁 邀请奖励: 每邀请1人 +克隆 {int(policy.get('invite_reward_clone', 0))} "
@@ -2989,6 +2997,7 @@ def settings_panel_text(settings: dict[str, Any]) -> str:
     mode = visual_mode_label(settings.get("mode"))
     fit_mode = fit_mode_label(settings.get("fit_mode"))
     clone_mode = clone_mode_label(settings.get("clone_mode"))
+    clone_title = (settings.get("clone_title") or "").strip() or "(自动: 来源标题 + 克隆)"
     make_target = make_target_mode_label(settings.get("make_target_mode"))
     short_name = (settings.get("current_pack_short") or "").strip() or "(自动)"
     title = (settings.get("current_pack_title") or "").strip() or "(自动)"
@@ -2998,6 +3007,7 @@ def settings_panel_text(settings: dict[str, Any]) -> str:
         f"视觉模式: {mode}\n"
         f"适配模式: {fit_mode}\n"
         f"克隆策略: {clone_mode}\n"
+        f"默认克隆标题: {clone_title}\n"
         f"发图去向: {make_target}\n"
         f"当前包短名: {short_name}\n"
         f"当前包标题: {title}\n\n"
@@ -3016,6 +3026,19 @@ def packs_panel_text(packs: list[dict[str, Any]], current_pack_short: str) -> st
         mark = " <- 当前" if short and short == current_pack_short else ""
         lines.append(f"{idx}. {title} ({short}) +{count}{mark}")
     return "\n".join(lines)
+
+
+def clone_done_keyboard(short_name: str) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = [
+        [
+            {"text": "✏️ 立即改标题", "callback_data": "set:title"},
+            {"text": "🏷 默认克隆标题", "callback_data": "set:clonetitle"},
+        ]
+    ]
+    clean_short = (short_name or "").strip()
+    if clean_short:
+        rows.append([{"text": "🌐 查看贴纸", "url": f"https://t.me/addstickers/{clean_short}"}])
+    return {"inline_keyboard": rows}
 
 
 async def safe_edit_status(
@@ -3049,9 +3072,25 @@ async def handle_clone_request(
     wm = (req.get("watermark") or "").strip() or (settings.get("watermark") or "").strip()
     new_title = req.get("new_title")
     new_short_name = req.get("new_short_name")
+    default_clone_title = (settings.get("clone_title") or "").strip()
     visual_mode = normalize_visual_mode(req.get("mode") or settings.get("mode"))
     fit_mode = normalize_fit_mode(req.get("fit_mode") or settings.get("fit_mode"))
     clone_mode = normalize_clone_mode(req.get("clone_mode") or settings.get("clone_mode"))
+
+    if (not new_title) and default_clone_title:
+        source_short = ""
+        try:
+            source_short = extract_sticker_set_name(source)
+        except ValueError:
+            source_short = ""
+        today = dt.datetime.now().strftime("%Y-%m-%d")
+        built_title = (
+            default_clone_title.replace("{source}", source_short or "clone")
+            .replace("{date}", today)
+            .strip()
+        )
+        if built_title:
+            new_title = built_title[:64]
 
     status = await client.send_message(chat_id, "任务已接收，开始克隆...")
     status_id = int(status["message_id"])
@@ -3096,6 +3135,15 @@ async def handle_clone_request(
             f"视觉={visual_mode_label(result['visual_mode'])} "
             f"适配={fit_mode_label(result['fit_mode'])}"
         ),
+    )
+    await client.send_message(
+        chat_id,
+        (
+            "如需立即修改本次克隆包标题：直接回复 /settitle 新标题\n"
+            "如需设置默认克隆标题：/setclonetitle 标题模板\n"
+            "模板支持变量：{source}（来源短名）和 {date}（日期）"
+        ),
+        reply_markup=clone_done_keyboard(str(result.get("target_short_name") or "")),
     )
     return result
 
@@ -3374,6 +3422,7 @@ async def cmd_serve(client: TelegramBotClient, args: argparse.Namespace) -> None
             "inline_keyboard": [
                 [_btn("🎨 视觉模式", "set:mode"), _btn("🧭 适配模式", "set:fit")],
                 [_btn("🧪 克隆策略", "set:clone"), _btn("🖼 发图去向", "set:maketarget")],
+                [_btn("🏷 默认克隆标题", "set:clonetitle"), _btn("🧹 清空默认克隆标题", "set:clonetitleclear")],
                 [_btn("🧹 清空署名", "set:wmclear"), _btn("✏ 修改包标题", "set:title")],
                 [_btn("📦 清空当前包", "set:packclear")],
                 [_btn("🔙 返回中心", "ctr:refresh")],
@@ -4081,6 +4130,28 @@ async def cmd_serve(client: TelegramBotClient, args: argparse.Namespace) -> None
                         )
                         await send_center(chat_id, user_id)
                         return
+                    if mode == "user_set_clone_default_title":
+                        template = text.strip()
+                        if not template:
+                            await client.send_message(chat_id, "默认克隆标题不能为空，请重新发送。")
+                            keep_user_input_state_alive(user_id)
+                            return
+                        if len(template) > 64:
+                            await client.send_message(chat_id, "默认克隆标题太长，最多 64 个字符。")
+                            keep_user_input_state_alive(user_id)
+                            return
+                        user_input_state.pop(user_id, None)
+                        prefs.set_user_pref(user_id, "clone_title", template)
+                        await client.send_message(
+                            chat_id,
+                            (
+                                "默认克隆标题已设置。\n"
+                                f"当前模板: {template}\n"
+                                "可用变量: {source}, {date}"
+                            ),
+                        )
+                        await send_settings(chat_id, user_id)
+                        return
 
                 if command == "start":
                     if payload.strip():
@@ -4438,6 +4509,39 @@ async def cmd_serve(client: TelegramBotClient, args: argparse.Namespace) -> None
                     clone_mode = normalize_clone_mode(raw_clone)
                     prefs.set_user_pref(user_id, "clone_mode", clone_mode)
                     await client.send_message(chat_id, f"默认克隆策略已设置: {clone_mode_label(clone_mode)}")
+                    await send_settings(chat_id, user_id)
+                    return
+
+                if command in {"setclonetitle", "setdefaulttitle", "setctitle"}:
+                    template = payload.strip()
+                    if not template:
+                        await client.send_message(
+                            chat_id,
+                            (
+                                "用法: /setclonetitle 标题模板\n"
+                                "示例: /setclonetitle {source} 克隆 {date}\n"
+                                "可用变量: {source}, {date}"
+                            ),
+                        )
+                        return
+                    if len(template) > 64:
+                        await client.send_message(chat_id, "默认克隆标题太长，最多 64 个字符。")
+                        return
+                    prefs.set_user_pref(user_id, "clone_title", template)
+                    await client.send_message(
+                        chat_id,
+                        (
+                            "默认克隆标题已设置。\n"
+                            f"当前模板: {template}\n"
+                            "可用变量: {source}, {date}"
+                        ),
+                    )
+                    await send_settings(chat_id, user_id)
+                    return
+
+                if command in {"clearclonetitle", "clearctitle"}:
+                    prefs.set_user_pref(user_id, "clone_title", None)
+                    await client.send_message(chat_id, "默认克隆标题已清空，后续将使用来源标题自动生成。")
                     await send_settings(chat_id, user_id)
                     return
 
@@ -4870,6 +4974,30 @@ async def cmd_serve(client: TelegramBotClient, args: argparse.Namespace) -> None
                 prefs.set_user_pref(user_id, "current_pack_title", None)
                 await send_settings(chat_id, user_id, message_id=message_id)
                 await ack("已清空当前包")
+                return
+
+            if data == "set:clonetitle":
+                settings = prefs.get_user_settings(user_id)
+                current_tpl = str(settings.get("clone_title") or "").strip() or "(未设置)"
+                set_user_input_state(user_id, chat_id, "user_set_clone_default_title")
+                await edit_or_send(
+                    chat_id=chat_id,
+                    text=(
+                        "请发送默认克隆标题模板（最多 64 字符）。\n"
+                        f"当前模板: {current_tpl}\n"
+                        "可用变量: {source}（来源短名）, {date}（日期）\n"
+                        "发送 /cancel 取消。"
+                    ),
+                    reply_markup=settings_keyboard(),
+                    message_id=message_id,
+                )
+                await ack("等待输入")
+                return
+
+            if data == "set:clonetitleclear":
+                prefs.set_user_pref(user_id, "clone_title", None)
+                await send_settings(chat_id, user_id, message_id=message_id)
+                await ack("已清空默认克隆标题")
                 return
 
             if data == "set:title":
